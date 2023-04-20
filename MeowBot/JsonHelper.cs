@@ -1,19 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
-using System.Threading.Tasks;
+﻿using System.Text.Json.Serialization;
 
-namespace MeowBot
-{
-    internal class JsonHelper
-    {
-        public static readonly JsonSerializerOptions Options = new JsonSerializerOptions()
-        {
-            WriteIndented = true,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-    }
-}
+namespace MeowBot;
+
+/// <summary>
+/// 提供AOT的序列化服务
+/// </summary>
+[JsonSerializable(typeof(AppConfig))]
+[JsonSourceGenerationOptions(WriteIndented = true, IgnoreReadOnlyProperties = true)]
+internal partial class AppConfigJsonSerializerContext : JsonSerializerContext { }

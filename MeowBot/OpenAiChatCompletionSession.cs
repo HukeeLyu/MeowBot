@@ -1,161 +1,147 @@
-﻿using RustSharp;
+﻿using System.Globalization;
+using RustSharp;
 using System.Net.Http.Json;
 
-namespace MeowBot
+namespace MeowBot;
+
+/// <summary>
+/// 一个逐用户的OpenAI对话，用于为一位用户提供包含上下文的GPT对话服务
+/// </summary>
+internal partial class OpenAiChatCompletionSession : IOpenAiCompletion
 {
-    internal class OpenAiChatCompletionSession : IOpenAiComplection
+    /// <summary>
+    /// 描述用户当前使用的GPT角色提示信息
+    /// </summary>
+    private string m_RoleText;
+    
+    /// <summary>
+    /// 描述用户当前设定的GPT温度信息
+    /// </summary>
+    private float m_Temperature;
+    
+    private string? m_DavinciRole;
+
+    private readonly AppConfig m_AppConfig;
+    
+    /// <summary>
+    /// 用户和GPT的对话历史上下文信息
+    /// </summary>
+    private readonly Queue<KeyValuePair<string, string>> m_DialogHistory = new();
+
+    private readonly string m_ApiKey;
+    private readonly string m_ApiUrl;
+    private readonly string m_Model;
+
+    /// <summary>
+    /// 用户和GPT的对话历史上下文信息
+    /// </summary>
+
+    public Queue<KeyValuePair<string, string>> History => m_DialogHistory;
+
+    public OpenAiChatCompletionSession(string apiKey, string apiUrl, string model, string roleText, AppConfig appConfig)
     {
-        private string initText =
-            """
-            我是一个高度智能的问答机器人。如果你问我一个植根于真理的问题，我会给你答案。如果你问我一个无稽之谈、诡计多端或没有明确答案的问题，我会回答“未知”。
-            """;
+        m_ApiKey = apiKey;
+        m_ApiUrl = apiUrl;
+        m_Model = model;
+        m_RoleText = roleText;
+        m_AppConfig = appConfig;
+        m_Temperature = 0.5f;
+    }
 
-        private string? davinciRole;
-        private Queue<KeyValuePair<string, string>> history =
-            new Queue<KeyValuePair<string, string>>();
+    /// <summary>
+    /// 更新当前用户使用的GPT温度信息
+    /// </summary>
+    /// <param name="roleText">新的GPT温度信息</param>
+    public void UpdateChatBotRole(string roleText) => m_RoleText = roleText;
 
-        public string ApiKey { get; }
-        public string ApiUrl { get; }
-        public string Model { get; }
-
-        public Queue<KeyValuePair<string, string>> History => history;
-
-        public OpenAiChatCompletionSession(string apiKey, string apiUrl, string model)
+    /// <summary>
+    /// 更新当前用户使用的GPT角色提示信息
+    /// </summary>
+    /// <param name="newTemperature"></param>
+    public void UpdateChatBotTemperature(float newTemperature) => m_Temperature = newTemperature;
+    
+    /// <summary>
+    /// 调用OpenAI服务器并且返回结果
+    /// </summary>
+    /// <param name="question">用户输入的文本</param>
+    /// <returns>结果</returns>
+    public async Task<Result<string, string>> AskAsync(string question)
+    {
+        var messageModels = new List<object>
         {
-            ApiKey = apiKey;
-            ApiUrl = apiUrl;
-            Model = model;
-        }
-
-        public void InitCatGirl()
-        {
-            initText = OpenAiCompletionInitTexts.CatGirl;
-        }
-
-        public void InitNewBing()
-        {
-            initText = OpenAiCompletionInitTexts.NewBing;
-        }
-
-        public void InitWithText(string text)
-        {
-            initText = text;
-        }
-
-        public async Task<Result<string, string>> AskAsync(string question)
-        {
-            List<object> messageModels = new List<object>();
-
-            messageModels.Add(new
+            new
             {
                 role = "system",
-                content = initText
-            });
-
-            messageModels.Add(new
+                content = m_RoleText
+            },
+            new
             {
                 role = "system",
-                content = "你不应该谈到任何有关政治的内容, 如果有关政治, 你应该回复 '我不被允许讨论政治相关内容'"
-            });
-
-            foreach (var kv in history)
-            {
-                messageModels.Add(new
-                {
-                    role = "user",
-                    content = kv.Key,
-                });
-
-                messageModels.Add(new
-                {
-                    role = davinciRole ?? "assistant",
-                    content = kv.Value
-                });
+                content = $"当前时间为: {DateTime.Now:U}，当用户想你询问涉及到当前时间的情况时，优先将此时间转换为{CultureInfo.CurrentCulture.DisplayName}区域的当地时间并且使用。"
             }
+        };
 
+        foreach (var systemCommand in m_AppConfig.SystemCommand)
+        {
+            messageModels.Add(new { role = "system", content = systemCommand });
+        }
+
+        foreach (var kv in m_DialogHistory)
+        {
             messageModels.Add(new
             {
                 role = "user",
-                content = question
+                content = kv.Key,
             });
 
-
-            var request =
-                new HttpRequestMessage(HttpMethod.Post, ApiUrl)
-                {
-                    Headers =
-                    {
-                        { "Authorization", $"Bearer {ApiKey}" }
-                    },
-
-                    Content = JsonContent.Create(
-                        new
-                        {
-                            model = Model,
-                            messages = messageModels,
-                            max_tokens = 2048,
-                            temperature = 0.5,
-                        }),
-                };
-
-            var response = await Utils.GlobalHttpClient.SendAsync(request);
-            var davinci_rst = await response.Content.ReadFromJsonAsync<davinci_result>();
-            if (davinci_rst == null)
-                return Result<string, string>.Err("API 无返回");
-
-            if (davinci_rst.error != null)
-                return Result<string, string>.Err($"API 返回错误: {davinci_rst.error.message}");
-
-            if (davinci_rst.choices == null)
-                return Result<string, string>.Err("API 响应无结果");
-
-            var davinci_rst_message =
-                davinci_rst.choices.FirstOrDefault()?.message;
-
-            if (davinci_rst_message == null)
-                return Result<string, string>.Err("API 响应结果无内容");
-
-            davinciRole = davinci_rst_message.role;
-
-            history.Enqueue(new KeyValuePair<string, string>(question, davinci_rst_message.content));
-
-            return Result<string, string>.Ok(davinci_rst_message.content);
+            messageModels.Add(new
+            {
+                role = m_DavinciRole ?? "assistant",
+                content = kv.Value
+            });
         }
 
-        public void Reset() => history.Clear();
-
-        public record class davinci_result
+        messageModels.Add(new
         {
-            public record class davinci_result_choice
+            role = "user",
+            content = question
+        });
+
+
+        var request =
+            new HttpRequestMessage(HttpMethod.Post, m_ApiUrl)
             {
-                public record class davinci_result_choice_message
+                Headers =
                 {
-                    public string role { get; set; } = string.Empty;
-                    public string content { get; set; } = string.Empty;
-                }
-                public int index { get; set; }
-                public davinci_result_choice_message? message { get; set; }
-                public string finish_reason { get; set; } = string.Empty;
-            }
-            public record class davinci_result_usage
-            {
-                public int prompt_tokens { get; set; }
-                public int completion_tokens { get; set; }
-                public int total_tokens { get; set; }
-            }
-            public record class davinci_result_error
-            {
-                public string message { get; set; } = string.Empty;
-                public string type { get; set; } = string.Empty;
-            }
+                    { "Authorization", $"Bearer {m_ApiKey}" }
+                },
 
-            public string id { get; set; } = string.Empty;
-            public string @object { get; set; } = string.Empty;
-            public int created { get; set; }
-            public davinci_result_choice[]? choices { get; set; }
-            public davinci_result_usage? usage { get; set; }
-            public davinci_result_error? error { get; set; }
-        }
+                Content = JsonContent.Create(
+                    new
+                    {
+                        model = m_Model,
+                        messages = messageModels,
+                        max_tokens = 2048,
+                        temperature = m_Temperature,
+                    }),
+            };
 
+        var response = await Utils.GlobalHttpClient.SendAsync(request);
+        var davinciRst = await response.Content.ReadFromJsonAsync<davinci_result>();
+        
+        if (davinciRst == null) return Result<string, string>.Err("API 无返回");
+        if (davinciRst.error != null) return Result<string, string>.Err($"API 返回错误: {davinciRst.error.message}");
+        if (davinciRst.choices == null) return Result<string, string>.Err("API 响应无结果");
+        
+        var davinciRstMessage = davinciRst.choices.FirstOrDefault()?.message;
+        
+        if (davinciRstMessage == null) return Result<string, string>.Err("API 响应结果无内容");
+        
+        m_DavinciRole = davinciRstMessage.role;
+        m_DialogHistory.Enqueue(new(question, davinciRstMessage.content));
+        await Console.Out.WriteLineAsync($"> \tOpen AI API 已回应，消耗({davinciRst.usage?.total_tokens})token");
+        return Result<string, string>.Ok(davinciRstMessage.content);
     }
+
+    public void Reset() => m_DialogHistory.Clear();
 }

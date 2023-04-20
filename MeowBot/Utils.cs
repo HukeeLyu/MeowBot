@@ -1,20 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace MeowBot;
 
-namespace MeowBot
+internal static class Utils
 {
-    internal class Utils
+    public static readonly HttpClient GlobalHttpClient = new();
+    public static void PressAnyKeyToContinue()
     {
-        public static readonly HttpClient GlobalHttpClient = 
-            new HttpClient();
-
-        public static void PressAnyKeyToContinue()
-        {
-            Console.WriteLine("Press any key to continue");
-            Console.ReadKey(true);
-        }
+        Console.WriteLine("Press any key to continue");
+        Console.ReadKey(true);
     }
 }
